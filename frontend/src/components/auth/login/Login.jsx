@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { doSignInWithEmailAndPassword, doSignInWithGoogle } from '../../../firebase/auth'
 import { useAuth } from '../../../contexts/authcontext/Authcontext'
-import { doc, setDoc, getFirestore, getDoc } from 'firebase/firestore'
+import { doc, setDoc, getFirestore } from 'firebase/firestore'
 import { getAuth } from 'firebase/auth'
 import { useGuestAccess } from '../useGuestAccess'
 import './Login.css'
@@ -14,12 +14,11 @@ const Login = () => {
 
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
-    const [accountPending, setIsSigningIn] = useState(false)
+    const [accountAction, setAccountAction] = useState(null)
     const [errorMessage, setErrorMessage] = useState('')
-    const [locationRequested, setLocationRequested] = useState(false)
     const [userType, setUserType] = useState('')
     const guestAccess = useGuestAccess(userType)
-    const isSigningIn = accountPending || guestAccess.pending
+    const isSigningIn = accountAction !== null || guestAccess.pending
 
     // Get user type from sessionStorage or location state
     useEffect(() => {
@@ -36,54 +35,6 @@ const Login = () => {
         }
     }, [userType])
 
-    const requestLocationPermission = async () => {
-        return new Promise((resolve, reject) => {
-            if (!navigator.geolocation) {
-                reject(new Error('Geolocation is not supported by this browser'))
-                return
-            }
-
-            navigator.geolocation.getCurrentPosition(
-                async (position) => {
-                    const { latitude, longitude } = position.coords
-                    try {
-                        const db = getFirestore()
-                        const auth = getAuth()
-                        const userRef = doc(db, 'users', auth.currentUser.uid)
-                        
-                        // Get existing user data
-                        const userSnap = await getDoc(userRef)
-                        const existingData = userSnap.exists() ? userSnap.data() : {}
-                        
-                        await setDoc(userRef, {
-                            ...existingData,
-                            location: {
-                                latitude,
-                                longitude,
-                                timestamp: new Date().toISOString()
-                            },
-                            // Preserve userType if it exists, otherwise use from session
-                            userType: existingData.userType || userType || 'farmer'
-                        }, { merge: true })
-                        resolve({ latitude, longitude })
-                    } catch (error) {
-                        console.error('Error saving location:', error)
-                        reject(error)
-                    }
-                },
-                (error) => {
-                    console.error('Location permission denied:', error)
-                    reject(error)
-                },
-                {
-                    enableHighAccuracy: true,
-                    timeout: 10000,
-                    maximumAge: 0
-                }
-            )
-        })
-    }
-
     const handleSubmit = async (e) => {
         e.preventDefault()
         if (!userType) {
@@ -92,7 +43,8 @@ const Login = () => {
         }
 
         if(!isSigningIn) {
-            setIsSigningIn(true)
+            setAccountAction('email')
+            setErrorMessage('')
             try {
                 await doSignInWithEmailAndPassword(email, password)
                 
@@ -106,26 +58,16 @@ const Login = () => {
                     }, { merge: true })
                 }
                 
-                // Request location permission after successful login
-                setTimeout(async () => {
-                    try {
-                        await requestLocationPermission()
-                        setLocationRequested(true)
-                    } catch (error) {
-                        console.log('Location permission denied or failed:', error)
-                        // Continue without location - don't block login
-                    }
-                }, 1000)
-                
                 // Navigation handled by Navigate component below
             } catch (error) {
                 setErrorMessage(error.message)
-                setIsSigningIn(false)
+            } finally {
+                setAccountAction(null)
             }
         }
     }
 
-    const onGoogleSignIn = (e) => {
+    const onGoogleSignIn = async (e) => {
         e.preventDefault()
         if (!userType) {
             setErrorMessage('Please select whether you are a farmer or a vendor.')
@@ -133,8 +75,10 @@ const Login = () => {
         }
 
         if (!isSigningIn) {
-            setIsSigningIn(true)
-            doSignInWithGoogle({ upgrade: false }).then(async () => {
+            setAccountAction('google')
+            setErrorMessage('')
+            try {
+                await doSignInWithGoogle({ upgrade: false })
                 // Save user type to Firestore
                 const db = getFirestore()
                 const auth = getAuth()
@@ -144,21 +88,11 @@ const Login = () => {
                         userType: userType
                     }, { merge: true })
                 }
-                
-                // Request location permission after successful Google login
-                setTimeout(async () => {
-                    try {
-                        await requestLocationPermission()
-                        setLocationRequested(true)
-                    } catch (error) {
-                        console.log('Location permission denied or failed:', error)
-                        // Continue without location - don't block login
-                    }
-                }, 1000)
-            }).catch((error) => {
+            } catch (error) {
                 setErrorMessage(error.message)
-                setIsSigningIn(false)
-            })
+            } finally {
+                setAccountAction(null)
+            }
         }
     }
 
@@ -233,20 +167,6 @@ const Login = () => {
                         </div>
                     )}
 
-                    {!locationRequested && userLoggedIn && (
-                        <div className="location-prompt">
-                            <p className="location-message">Allow location access for better map experience</p>
-                            <button
-                                type="button"
-                                className="btn location-btn"
-                                onClick={requestLocationPermission}
-                                disabled={isSigningIn}
-                            >
-                                Enable Location
-                            </button>
-                        </div>
-                    )}
-
                     <div className="mb-3">
                         <button
                             type="button"
@@ -262,7 +182,7 @@ const Login = () => {
                         className="btn btn-primary"
                         disabled={isSigningIn}
                     >
-                        {isSigningIn ? 'SIGNING IN...' : 'LOGIN'}
+                        {accountAction === 'email' ? 'SIGNING IN...' : 'LOGIN'}
                     </button>
 
                     <div className="divider">
@@ -290,7 +210,7 @@ const Login = () => {
                                 </clipPath>
                             </defs>
                         </svg>
-                        {isSigningIn ? 'Signing In...' : 'Continue with Google'}
+                        {accountAction === 'google' ? 'Signing In...' : 'Continue with Google'}
                     </button>
                     <div className="divider">
                         <div className="divider-line"></div>

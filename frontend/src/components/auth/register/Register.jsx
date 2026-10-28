@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../../contexts/authcontext/Authcontext'
 import { doCreateUserWithEmailAndPassword, doSignInWithGoogle } from '../../../firebase/auth'
-import { doc, setDoc, getFirestore, getDoc } from 'firebase/firestore'
+import { doc, setDoc, getFirestore } from 'firebase/firestore'
 import { getAuth } from 'firebase/auth'
 import { useGuestAccess } from '../useGuestAccess'
 import './Register.css'
@@ -11,16 +11,15 @@ const Register = () => {
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
     const [confirmPassword, setConfirmPassword] = useState('')
-    const [accountPending, setIsRegistering] = useState(false)
+    const [accountAction, setAccountAction] = useState(null)
     const [errorMessage, setErrorMessage] = useState('')
     const [userType, setUserType] = useState(null)
-    const [, setLocationRequested] = useState(false)
 
     const { userLoggedIn, isGuest } = useAuth()
     const navigate = useNavigate()
     const location = useLocation()
     const guestAccess = useGuestAccess(userType)
-    const isRegistering = accountPending || guestAccess.pending
+    const isRegistering = accountAction !== null || guestAccess.pending
 
     // Get user type from sessionStorage or location state
     useEffect(() => {
@@ -29,76 +28,15 @@ const Register = () => {
         setUserType(typeFromStorage || typeFromState || null)
     }, [location])
 
-    const requestLocationPermission = async () => {
-        return new Promise((resolve, reject) => {
-            if (!navigator.geolocation) {
-                reject(new Error('Geolocation is not supported by this browser'))
-                return
-            }
-
-            navigator.geolocation.getCurrentPosition(
-                async (position) => {
-                    const { latitude, longitude } = position.coords
-                    try {
-                        const db = getFirestore()
-                        const auth = getAuth()
-                        const userRef = doc(db, 'users', auth.currentUser.uid)
-
-                        // Get existing user data
-                        const userSnap = await getDoc(userRef)
-                        const existingData = userSnap.exists() ? userSnap.data() : {}
-
-                        await setDoc(userRef, {
-                            ...existingData,
-                            location: {
-                                latitude,
-                                longitude,
-                                timestamp: new Date().toISOString()
-                            },
-                            userType: existingData.userType || userType || 'farmer'
-                        }, { merge: true })
-
-                        console.log('Location saved:', { latitude, longitude })
-                        resolve({ latitude, longitude })
-                    } catch (error) {
-                        console.error('Error saving location:', error)
-                        reject(error)
-                    }
-                },
-                (error) => {
-                    console.error('Location permission denied:', error)
-                    reject(error)
-                },
-                {
-                    enableHighAccuracy: true,
-                    timeout: 10000,
-                    maximumAge: 0
-                }
-            )
-        })
-    }
-
     const handleSubmit = async (e) => {
         e.preventDefault()
         if (!isRegistering) {
-            setIsRegistering(true)
             if (password !== confirmPassword) {
                 setErrorMessage("Passwords do not match")
-                setIsRegistering(false)
                 return
             }
-
-            // Request location permission FIRST (while we have user interaction context)
-            let locationData = null;
-            try {
-                console.log('Requesting location permission...');
-                locationData = await requestLocationPermission();
-                console.log('Location obtained:', locationData);
-            } catch (error) {
-                console.log('Location permission denied or failed:', error);
-                // Continue without location - don't block registration
-            }
-
+            setAccountAction('email')
+            setErrorMessage('')
             try {
                 await doCreateUserWithEmailAndPassword(email, password)
 
@@ -110,21 +48,15 @@ const Register = () => {
                     await setDoc(userRef, {
                         email: email,
                         userType: userType,
-                        createdAt: new Date().toISOString(),
-                        ...(locationData && {
-                            location: {
-                                latitude: locationData.latitude,
-                                longitude: locationData.longitude,
-                                timestamp: new Date().toISOString()
-                            }
-                        })
+                        createdAt: new Date().toISOString()
                     }, { merge: true })
                 }
 
                 // Navigation handled by Navigate component below
             } catch (error) {
                 setErrorMessage(error.message)
-                setIsRegistering(false)
+            } finally {
+                setAccountAction(null)
             }
         }
     }
@@ -132,7 +64,8 @@ const Register = () => {
     const onGoogleSignIn = async (e) => {
         e.preventDefault()
         if (!isRegistering) {
-            setIsRegistering(true)
+            setAccountAction('google')
+            setErrorMessage('')
             try {
                 await doSignInWithGoogle()
 
@@ -147,20 +80,10 @@ const Register = () => {
                         createdAt: new Date().toISOString()
                     }, { merge: true })
                 }
-
-                // Request location permission after successful Google registration
-                setTimeout(async () => {
-                    try {
-                        await requestLocationPermission()
-                        setLocationRequested(true)
-                    } catch (error) {
-                        console.log('Location permission denied or failed:', error)
-                        // Continue without location - don't block registration
-                    }
-                }, 1000)
             } catch (error) {
                 setErrorMessage(error.message)
-                setIsRegistering(false)
+            } finally {
+                setAccountAction(null)
             }
         }
     }
@@ -266,7 +189,7 @@ const Register = () => {
                         className="btn btn-primary"
                         disabled={isRegistering}
                     >
-                        {isRegistering ? 'SIGNING UP...' : 'SIGN UP'}
+                        {accountAction === 'email' ? 'SIGNING UP...' : 'SIGN UP'}
                     </button>
 
                     <div className="divider">
@@ -294,7 +217,7 @@ const Register = () => {
                                 </clipPath>
                             </defs>
                         </svg>
-                        {isRegistering ? 'Signing Up...' : 'Continue with Google'}
+                        {accountAction === 'google' ? 'Signing Up...' : 'Continue with Google'}
                     </button>
                     <div className="divider">
                         <div className="divider-line"></div>
