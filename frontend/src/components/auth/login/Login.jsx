@@ -1,0 +1,314 @@
+import React, { useState, useEffect } from 'react'
+import { Navigate, useNavigate, useLocation } from 'react-router-dom'
+import { doSignInWithEmailAndPassword, doSignInWithGoogle } from '../../../firebase/auth'
+import { useAuth } from '../../../contexts/authcontext/Authcontext'
+import { doc, setDoc, getFirestore, getDoc } from 'firebase/firestore'
+import { getAuth } from 'firebase/auth'
+import { useGuestAccess } from '../useGuestAccess'
+import './Login.css'
+
+const Login = () => {
+    const { userLoggedIn, isGuest } = useAuth()
+    const navigate = useNavigate()
+    const location = useLocation()
+
+    const [email, setEmail] = useState('')
+    const [password, setPassword] = useState('')
+    const [accountPending, setIsSigningIn] = useState(false)
+    const [errorMessage, setErrorMessage] = useState('')
+    const [locationRequested, setLocationRequested] = useState(false)
+    const [userType, setUserType] = useState('')
+    const guestAccess = useGuestAccess(userType)
+    const isSigningIn = accountPending || guestAccess.pending
+
+    // Get user type from sessionStorage or location state
+    useEffect(() => {
+        const typeFromStorage = sessionStorage.getItem('userType')
+        const typeFromState = location.state?.userType
+        setUserType(typeFromStorage || typeFromState || '')
+    }, [location])
+
+    useEffect(() => {
+        if (userType) {
+            sessionStorage.setItem('userType', userType)
+        } else {
+            sessionStorage.removeItem('userType')
+        }
+    }, [userType])
+
+    const requestLocationPermission = async () => {
+        return new Promise((resolve, reject) => {
+            if (!navigator.geolocation) {
+                reject(new Error('Geolocation is not supported by this browser'))
+                return
+            }
+
+            navigator.geolocation.getCurrentPosition(
+                async (position) => {
+                    const { latitude, longitude } = position.coords
+                    try {
+                        const db = getFirestore()
+                        const auth = getAuth()
+                        const userRef = doc(db, 'users', auth.currentUser.uid)
+                        
+                        // Get existing user data
+                        const userSnap = await getDoc(userRef)
+                        const existingData = userSnap.exists() ? userSnap.data() : {}
+                        
+                        await setDoc(userRef, {
+                            ...existingData,
+                            location: {
+                                latitude,
+                                longitude,
+                                timestamp: new Date().toISOString()
+                            },
+                            // Preserve userType if it exists, otherwise use from session
+                            userType: existingData.userType || userType || 'farmer'
+                        }, { merge: true })
+                        resolve({ latitude, longitude })
+                    } catch (error) {
+                        console.error('Error saving location:', error)
+                        reject(error)
+                    }
+                },
+                (error) => {
+                    console.error('Location permission denied:', error)
+                    reject(error)
+                },
+                {
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 0
+                }
+            )
+        })
+    }
+
+    const handleSubmit = async (e) => {
+        e.preventDefault()
+        if (!userType) {
+            setErrorMessage('Please select whether you are a farmer or a vendor.')
+            return
+        }
+
+        if(!isSigningIn) {
+            setIsSigningIn(true)
+            try {
+                await doSignInWithEmailAndPassword(email, password)
+                
+                // Save user type to Firestore
+                const db = getFirestore()
+                const auth = getAuth()
+                if (auth.currentUser && userType) {
+                    const userRef = doc(db, 'users', auth.currentUser.uid)
+                    await setDoc(userRef, {
+                        userType: userType
+                    }, { merge: true })
+                }
+                
+                // Request location permission after successful login
+                setTimeout(async () => {
+                    try {
+                        await requestLocationPermission()
+                        setLocationRequested(true)
+                    } catch (error) {
+                        console.log('Location permission denied or failed:', error)
+                        // Continue without location - don't block login
+                    }
+                }, 1000)
+                
+                // Navigation handled by Navigate component below
+            } catch (error) {
+                setErrorMessage(error.message)
+                setIsSigningIn(false)
+            }
+        }
+    }
+
+    const onGoogleSignIn = (e) => {
+        e.preventDefault()
+        if (!userType) {
+            setErrorMessage('Please select whether you are a farmer or a vendor.')
+            return
+        }
+
+        if (!isSigningIn) {
+            setIsSigningIn(true)
+            doSignInWithGoogle({ upgrade: false }).then(async () => {
+                // Save user type to Firestore
+                const db = getFirestore()
+                const auth = getAuth()
+                if (auth.currentUser && userType) {
+                    const userRef = doc(db, 'users', auth.currentUser.uid)
+                    await setDoc(userRef, {
+                        userType: userType
+                    }, { merge: true })
+                }
+                
+                // Request location permission after successful Google login
+                setTimeout(async () => {
+                    try {
+                        await requestLocationPermission()
+                        setLocationRequested(true)
+                    } catch (error) {
+                        console.log('Location permission denied or failed:', error)
+                        // Continue without location - don't block login
+                    }
+                }, 1000)
+            }).catch((error) => {
+                setErrorMessage(error.message)
+                setIsSigningIn(false)
+            })
+        }
+    }
+
+    return (
+        <>
+            {userLoggedIn && !isGuest && (<Navigate to={'/home'} replace={true} />)}
+
+            {/* Background Gradient Fallback */}
+            <div className="background-fallback"></div>
+
+            {/* Background Video */}
+            <video 
+                className="background-video" 
+                autoPlay 
+                loop 
+                muted 
+                playsInline
+                preload="auto"
+                poster="https://images.unsplash.com/photo-1625246333195-78d9c38ad449?w=1920&h=1080&fit=crop"
+            >
+                <source src="https://github.com/AvinashJ74/AgriShop/assets/83860778/dcc330e0-3690-48f4-a135-073c038b6b38" type='video/mp4' />
+            </video>
+
+            <div className="form-container" style={{ minHeight: "100vh" }}>
+                <form onSubmit={handleSubmit} className="auth-form">
+                    <h4 className="title">Login to AgriVision</h4>
+
+                    <div className="mb-3">
+                        <select
+                            className="form-control role-select"
+                            value={userType}
+                            onChange={(e) => {
+                                setUserType(e.target.value)
+                                if (errorMessage) setErrorMessage('')
+                            }}
+                            required
+                        >
+                            <option value="" disabled>Select your role</option>
+                            <option value="farmer">Farmer</option>
+                            <option value="vendor">Vendor</option>
+                        </select>
+                    </div>
+                    
+                    <div className="mb-3">
+                        <input
+                            type="email"
+                            autoFocus
+                            autoComplete='email'
+                            required
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            className="form-control"
+                            placeholder="Enter Your Email"
+                        />
+                    </div>
+
+                    <div className="mb-3">
+                        <input
+                            type="password"
+                            autoComplete='current-password'
+                            required
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            className="form-control"
+                            placeholder="Enter Your Password"
+                        />
+                    </div>
+
+                    {(errorMessage || guestAccess.error) && (
+                        <div className="error-message" role="alert">
+                            {errorMessage || guestAccess.error}
+                        </div>
+                    )}
+
+                    {!locationRequested && userLoggedIn && (
+                        <div className="location-prompt">
+                            <p className="location-message">Allow location access for better map experience</p>
+                            <button
+                                type="button"
+                                className="btn location-btn"
+                                onClick={requestLocationPermission}
+                                disabled={isSigningIn}
+                            >
+                                Enable Location
+                            </button>
+                        </div>
+                    )}
+
+                    <div className="mb-3">
+                        <button
+                            type="button"
+                            className="btn forgot-btn"
+                            onClick={() => navigate("/register")}
+                        >
+                            Don't have an account? Sign Up
+                        </button>
+                    </div>
+
+                    <button 
+                        type="submit" 
+                        className="btn btn-primary"
+                        disabled={isSigningIn}
+                    >
+                        {isSigningIn ? 'SIGNING IN...' : 'LOGIN'}
+                    </button>
+
+                    <div className="divider">
+                        <div className="divider-line"></div>
+                        <div className="divider-text">OR</div>
+                        <div className="divider-line"></div>
+                    </div>
+
+                    <button
+                        type="button"
+                        disabled={isSigningIn}
+                        onClick={onGoogleSignIn}
+                        className="btn btn-google"
+                    >
+                        <svg className="google-icon" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <g clipPath="url(#clip0_17_40)">
+                                <path d="M47.532 24.5528C47.532 22.9214 47.3997 21.2811 47.1175 19.6761H24.48V28.9181H37.4434C36.9055 31.8988 35.177 34.5356 32.6461 36.2111V42.2078H40.3801C44.9217 38.0278 47.532 31.8547 47.532 24.5528Z" fill="#4285F4" />
+                                <path d="M24.48 48.0016C30.9529 48.0016 36.4116 45.8764 40.3888 42.2078L32.6549 36.2111C30.5031 37.675 27.7252 38.5039 24.4888 38.5039C18.2275 38.5039 12.9187 34.2798 11.0139 28.6006H3.03296V34.7825C7.10718 42.8868 15.4056 48.0016 24.48 48.0016Z" fill="#34A853" />
+                                <path d="M11.0051 28.6006C9.99973 25.6199 9.99973 22.3922 11.0051 19.4115V13.2296H3.03298C-0.371021 20.0112 -0.371021 28.0009 3.03298 34.7825L11.0051 28.6006Z" fill="#FBBC04" />
+                                <path d="M24.48 9.49932C27.9016 9.44641 31.2086 10.7339 33.6866 13.0973L40.5387 6.24523C36.2 2.17101 30.4414 -0.068932 24.48 0.00161733C15.4055 0.00161733 7.10718 5.11644 3.03296 13.2296L11.005 19.4115C12.901 13.7235 18.2187 9.49932 24.48 9.49932Z" fill="#EA4335" />
+                            </g>
+                            <defs>
+                                <clipPath id="clip0_17_40">
+                                    <rect width="48" height="48" fill="white" />
+                                </clipPath>
+                            </defs>
+                        </svg>
+                        {isSigningIn ? 'Signing In...' : 'Continue with Google'}
+                    </button>
+                    <div className="divider">
+                        <div className="divider-line"></div>
+                        <div className="divider-text">OR</div>
+                        <div className="divider-line"></div>
+                    </div>
+                    <button
+                        type="button"
+                        className="btn btn-google"
+                        disabled={isSigningIn}
+                        onClick={guestAccess.continueAsGuest}
+                    >
+                        {guestAccess.pending ? 'Starting guest session...' : 'Continue as guest'}
+                    </button>
+                </form>
+            </div>
+        </>
+    )
+}
+
+export default Login

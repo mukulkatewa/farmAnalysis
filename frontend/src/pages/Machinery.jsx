@@ -1,0 +1,258 @@
+import { useCallback } from "react";
+import React, { useState, useEffect } from "react";
+import Navbar from "../components/dashboard/Navbar";
+import Sidebar from "../components/dashboard/Sidebar";
+import { useAuth } from "../contexts/authcontext/Authcontext";
+import { Navigate, useNavigate } from "react-router-dom";
+import { doSignOut } from "../firebase/auth";
+import { db } from "../firebase/firebase";
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+  doc,
+  getDoc,
+} from "firebase/firestore";
+import { Wrench, Phone, Mail, MapPin, Search, DollarSign } from "lucide-react";
+
+const Machinery = () => {
+  const { currentUser, userLoggedIn } = useAuth();
+  const navigate = useNavigate();
+  const [machineryList, setMachineryList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [userLocation, setUserLocation] = useState(null);
+
+  const fetchUserLocation = useCallback(async () => {
+    try {
+      const userRef = doc(db, "users", currentUser.uid);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists() && userSnap.data().location) {
+        setUserLocation({
+          lat: userSnap.data().location.latitude,
+          lng: userSnap.data().location.longitude,
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching location:", error);
+    }
+  }, [currentUser]);
+  useEffect(() => {
+    if (currentUser) {
+      fetchUserLocation();
+      fetchMachinery();
+    }
+  }, [currentUser, fetchUserLocation]);
+
+  const fetchMachinery = async () => {
+    try {
+      const q = query(
+        collection(db, "vendors"),
+        where("services", "array-contains", "machinery"),
+      );
+      const querySnapshot = await getDocs(q);
+      const machinery = [];
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.machineryList && Array.isArray(data.machineryList)) {
+          data.machineryList.forEach((item) => {
+            machinery.push({
+              id: `${doc.id}-${item.name}`,
+              vendorId: doc.id,
+              vendorName: data.name,
+              vendorLocation: data.location,
+              vendorPhone: data.phone,
+              vendorEmail: data.email,
+              vendorLocationCoords: data.locationCoords,
+              ...item,
+            });
+          });
+        }
+      });
+      setMachineryList(machinery);
+    } catch (error) {
+      console.error("Error fetching machinery:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    if (!lat1 || !lon1 || !lat2 || !lon2) return null;
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return (R * c).toFixed(1);
+  };
+
+  const filteredMachinery = machineryList.filter(
+    (item) =>
+      item.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      item.vendorLocation?.toLowerCase().includes(searchTerm.toLowerCase()),
+  );
+
+  const handleLogout = async () => {
+    try {
+      await doSignOut();
+      navigate("/");
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
+  };
+
+  if (!userLoggedIn) return <Navigate to="/login" replace />;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-green-100">
+      <Navbar currentUser={currentUser} onLogout={handleLogout} />
+      <Sidebar />
+
+      <div className="pt-20 lg:ml-64 px-8 pb-8">
+        <div className="max-w-7xl mx-auto">
+          <div className="mb-6">
+            <h1 className="text-3xl font-semibold text-gray-900 tracking-tight mb-2">
+              🚜 Machinery Rental
+            </h1>
+            <p className="text-gray-600 text-base">
+              Find and rent agricultural machinery near your location
+            </p>
+          </div>
+
+          {/* Search Bar */}
+          <div className="bg-white rounded-xl shadow-md border border-gray-200 p-4 mb-6">
+            <div className="flex items-center gap-3">
+              <Search className="w-5 h-5 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search machinery (e.g., cultivator, harvester, tractor)..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="flex-1 outline-none text-gray-700"
+              />
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="text-center py-12">
+              <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
+            </div>
+          ) : filteredMachinery.length === 0 ? (
+            <div className="bg-white rounded-xl shadow-md border border-gray-200 p-12 text-center">
+              <Wrench className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                No Machinery Found
+              </h3>
+              <p className="text-gray-600">
+                {searchTerm
+                  ? "Try a different search term"
+                  : "No machinery is currently available. Check back later!"}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredMachinery.map((item) => {
+                const distance =
+                  userLocation && item.vendorLocationCoords
+                    ? calculateDistance(
+                        userLocation.lat,
+                        userLocation.lng,
+                        item.vendorLocationCoords.latitude,
+                        item.vendorLocationCoords.longitude,
+                      )
+                    : null;
+
+                return (
+                  <div
+                    key={item.id}
+                    className="bg-white rounded-xl shadow-md border border-gray-200 p-6 hover:shadow-lg transition-shadow"
+                  >
+                    <div className="flex items-start justify-between mb-4">
+                      <div>
+                        <h3 className="text-xl font-semibold text-gray-900 mb-1">
+                          {item.name || "Machinery"}
+                        </h3>
+                        {item.type && (
+                          <p className="text-sm text-gray-600">{item.type}</p>
+                        )}
+                        {distance && (
+                          <p className="text-sm text-green-600 font-medium mt-1">
+                            {distance} km away
+                          </p>
+                        )}
+                      </div>
+                      <Wrench className="w-8 h-8 text-orange-600" />
+                    </div>
+
+                    <div className="space-y-2 mb-4">
+                      <div className="flex items-center gap-2 text-gray-600">
+                        <span className="text-sm font-medium">Vendor:</span>
+                        <span className="text-sm">{item.vendorName}</span>
+                      </div>
+                      {item.vendorLocation && (
+                        <div className="flex items-center gap-2 text-gray-600">
+                          <MapPin className="w-4 h-4" />
+                          <span className="text-sm">{item.vendorLocation}</span>
+                        </div>
+                      )}
+                      {item.price && (
+                        <div className="flex items-center gap-2 text-gray-600">
+                          <DollarSign className="w-4 h-4" />
+                          <span className="text-sm font-semibold text-green-600">
+                            ₹{item.price} {item.priceUnit || "/day"}
+                          </span>
+                        </div>
+                      )}
+                      {item.vendorPhone && (
+                        <div className="flex items-center gap-2 text-gray-600">
+                          <Phone className="w-4 h-4" />
+                          <a
+                            href={`tel:${item.vendorPhone}`}
+                            className="text-sm hover:text-green-600"
+                          >
+                            {item.vendorPhone}
+                          </a>
+                        </div>
+                      )}
+                    </div>
+
+                    {item.description && (
+                      <p className="text-sm text-gray-600 mb-4">
+                        {item.description}
+                      </p>
+                    )}
+
+                    <div className="flex gap-2">
+                      <a
+                        href={`tel:${item.vendorPhone || ""}`}
+                        className="flex-1 bg-green-600 text-white text-center py-2 rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                      >
+                        Call Now
+                      </a>
+                      <button
+                        onClick={() => navigate(`/chat/${item.vendorId}`)}
+                        className="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                      >
+                        Chat
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default Machinery;

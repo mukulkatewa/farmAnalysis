@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: Inter, system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  font-family: Roboto, Inter, system-ui, sans-serif;
+}
+
+/* Background FIX */
+@layer base {
+  body {
+    @apply bg-gradient-to-br from-green-50 via-white to-green-100;
+    min-height: 100vh;
+  }
+}
+
+/* Remove if blocking full page gradient */
+/* #root {
+  min-height: 100vh;
+  width: 100%;
+} */
