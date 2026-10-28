@@ -1,0 +1,12 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "users": {"$uid": {"fields": {"$fieldId": {"soil": {
+      ".read": "auth != null && auth.uid === $uid",
+      "$readingId": {
+        ".write": "auth != null && auth.uid === $uid && (auth.token.sensor === true || !newData.exists())"
+      }
+    }}}}}
+  }
+}

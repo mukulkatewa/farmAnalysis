@@ -1,0 +1,35 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn(){return request.auth != null;}
+    function owner(uid){return signedIn() && request.auth.uid == uid;}
+    function member(id){return signedIn() && request.auth.uid in get(/databases/$(database)/documents/conversations/$(id)).data.participants;}
+    match /users/{uid} {
+      allow read: if owner(uid);
+      allow create: if owner(uid) && !request.resource.data.keys().hasAny(['admin','email_verified','phone_verified']) && (!('role' in request.resource.data) || request.resource.data.role == 'user');
+      allow update: if owner(uid) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role','admin','email_verified','phone_verified']);
+      match /fields/{fieldId} {
+        allow read, delete: if owner(uid);
+        allow create, update: if owner(uid) && request.resource.data.coordinates is list && request.resource.data.coordinates.size() >= 3 && request.resource.data.coordinates.size() <= 200;
+      }
+      // Analysis, quota, request and result-part documents are backend-only.
+      match /{document=**} { allow read,write: if false; }
+    }
+    match /vendors/{uid} {
+      // Vendor documents are intentionally public business listings to signed-in users.
+      allow read: if signedIn();
+      allow write: if owner(uid);
+    }
+    match /conversations/{id} {
+      allow create: if signedIn() && request.resource.data.participants is list && request.resource.data.participants.size()==2 && request.auth.uid in request.resource.data.participants;
+      allow get: if signedIn() && (!exists(/databases/$(database)/documents/conversations/$(id)) || request.auth.uid in resource.data.participants);
+      allow list: if signedIn() && request.auth.uid in resource.data.participants;
+      allow update: if member(id) && request.resource.data.participants == resource.data.participants && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['unreadFor','lastMessageText','lastMessageSenderId','lastMessageSenderName','updatedAt']) && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastMessageSenderId']) || request.resource.data.lastMessageSenderId == request.auth.uid);
+      match /messages/{message} {
+        allow read: if member(id);
+        allow create: if member(id) && request.resource.data.senderId==request.auth.uid && request.resource.data.text is string && request.resource.data.text.size()>0 && request.resource.data.text.size()<=4000;
+      }
+    }
+    match /{document=**} {allow read,write: if false;}
+  }
+}

@@ -1,0 +1,10 @@
+node_modules
+.env*
+dist
+tests
+browser-tests
+test-results
+playwright-report
+playwright.config.js
+*.log
+.git
