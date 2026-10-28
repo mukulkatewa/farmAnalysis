@@ -446,13 +446,16 @@ export default function Alerts() {
   };
 
   const [analysisMeta, setAnalysisMeta] = useState(null);
+  const [analyzingField, setAnalyzingField] = useState(null);
   const pendingAnalysis = useRef(new Set());
   const activeField = useRef(null);
   const fieldScope = `${currentUser?.uid}:${selectedField?.id}`;
+  const isAnalyzing = analyzingField === fieldScope;
   activeField.current = fieldScope;
   const runLSTM = async (latVal, lonVal) => {
     if (pendingAnalysis.current.has(fieldScope)) return;
     pendingAnalysis.current.add(fieldScope);
+    setAnalyzingField(fieldScope);
 
     setDescriptions({});
     setLoading(true);
@@ -524,6 +527,7 @@ export default function Alerts() {
       setLoading(false);
     } finally {
       pendingAnalysis.current.delete(fieldScope);
+      setAnalyzingField((active) => (active === fieldScope ? null : active));
     }
   };
 
@@ -560,6 +564,7 @@ export default function Alerts() {
   useEffect(() => {
     let active = true;
     setAlerts({ daily: [], weekly: [], biweekly: [] });
+    setAnalysisMeta(null);
     setDescriptions({});
     setError(null);
     if (userType !== "farmer" || !selectedField || fieldsLoading) return;
@@ -785,7 +790,7 @@ export default function Alerts() {
               </div>
             </div>
 
-            {/* Field Selector & Refresh Button for Farmers */}
+            {/* Field Selector and Alert Actions for Farmers */}
             {!isVendor && (
               <div className="flex items-center gap-3">
                 {/* Field Selector */}
@@ -836,18 +841,6 @@ export default function Alerts() {
                 >
                   Explain alerts with AI
                 </Button>
-                {/* Refresh Button */}
-                <button
-                  onClick={() => loadFieldData(true)}
-                  disabled={loading || !selectedField}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-                >
-                  <RefreshCw
-                    className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}
-                  />
-                  {loading ? "Analyzing…" : "Analyze alerts"}
-                </button>
-
                 {/* Send Alerts Button */}
                 <button
                   onClick={sendAllAlerts}
@@ -900,13 +893,44 @@ export default function Alerts() {
             </Tabs>
           )}
 
+          {!isVendor && fields.length > 0 && (
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold text-gray-700">
+                Disease, pest &amp; stress predictions
+              </h2>
+              <button
+                type="button"
+                onClick={loadFieldData}
+                disabled={
+                  loading ||
+                  fieldsLoading ||
+                  !currentUser ||
+                  !Number.isFinite(selectedField?.lat) ||
+                  !Number.isFinite(selectedField?.lng)
+                }
+                aria-label="Analyze disease, pest, and stress predictions"
+                aria-busy={isAnalyzing}
+                className="inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-green-700 transition-colors hover:bg-green-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isAnalyzing && (
+                  <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
+                )}
+                {isAnalyzing ? "Analyzing…" : "Analyze"}
+              </button>
+            </div>
+          )}
+
           {/* Loading State */}
           {loading && (
             <Card className="p-8 text-center border-2">
               <div className="flex flex-col items-center gap-3">
                 <RefreshCw className="h-8 w-8 animate-spin text-green-600" />
                 <p className="text-gray-600">
-                  Loading alerts from satellite data...
+                  {isAnalyzing
+                    ? "Analyzing disease, pest, and stress predictions…"
+                    : isVendor
+                      ? "Loading notifications…"
+                      : "Loading saved predictions…"}
                 </p>
               </div>
             </Card>
@@ -941,14 +965,14 @@ export default function Alerts() {
                   Analyzed:{" "}
                   {new Date(analysisMeta.generatedAt).toLocaleString()}{" "}
                   {analysisMeta.stale
-                    ? "— saved result is stale; click Analyze alerts to refresh."
+                    ? "— saved result is stale; click Analyze to refresh."
                     : ""}
                 </p>
               )}
               {currentAlerts.length === 0 && (
                 <p className="rounded-lg bg-white p-4 text-gray-600">
-                  No saved analysis for this field. Click Analyze alerts to
-                  generate a forecast.
+                  Click Analyze to generate disease, pest, and stress
+                  predictions for this field.
                 </p>
               )}
               {currentAlerts.map((alert) => {

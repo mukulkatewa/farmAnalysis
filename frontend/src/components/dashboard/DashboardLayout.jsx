@@ -300,50 +300,6 @@ const DashboardLayout = ({ currentUser, onLogout }) => {
             </div>
           )}
 
-          {selectedField && (
-            <div className="mb-6 rounded-xl border border-green-200 bg-white p-4">
-              <button
-                onClick={prediction.analyze}
-                disabled={
-                  prediction.loading ||
-                  !currentUser ||
-                  !Number.isFinite(selectedField.lat) ||
-                  !Number.isFinite(selectedField.lng)
-                }
-                className="rounded-lg bg-green-700 px-4 py-2 text-white disabled:opacity-50"
-              >
-                {prediction.loading ? "Analyzing…" : "Analyze forecast"}
-              </button>
-              {prediction.data && (
-                <button
-                  onClick={() => prediction.analyze(true)}
-                  disabled={prediction.loading}
-                  className="ml-3 text-green-700 underline"
-                >
-                  Refresh forecast
-                </button>
-              )}
-              <p className="mt-2 text-sm text-gray-600">
-                Forecasts run only when you click Analyze. Vegetation analysis
-                has its own control below.
-              </p>
-              {prediction.completedAt && (
-                <p className="text-sm text-gray-500">
-                  Last analyzed:{" "}
-                  {new Date(prediction.completedAt).toLocaleString()}
-                  {prediction.stale
-                    ? " — saved result is stale; refresh to update."
-                    : ""}
-                </p>
-              )}
-              {prediction.error && (
-                <p role="alert" className="text-red-700">
-                  {prediction.error}
-                </p>
-              )}
-            </div>
-          )}
-
           {/* PASS SELECTED FIELD */}
           {selectedField && (
             <StatsCards
